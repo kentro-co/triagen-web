@@ -120,7 +120,10 @@ async function request<T>(
             let message = text || `HTTP ${response.status}`;
             try {
                 const json = JSON.parse(text);
-                message = json.error || json.detail || json.message || message;
+                // NestJS puts the description in `message` and only the status
+                // name ("Bad Request") in `error`.
+                const nestMessage = typeof json.message === "string" ? json.message : undefined;
+                message = nestMessage || json.error || json.detail || message;
             } catch {
                 // plain text error
             }

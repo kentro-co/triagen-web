@@ -185,7 +185,8 @@ function JobApplicationPage() {
         email: formData.email,
         phone: formData.phone || undefined,
         job_id: jobId,
-        resume_text: formData.resume_text || undefined,
+        // The API requires the field; an empty string means "no resume".
+        resume_text: formData.resume_text,
         pre_interview_answers: Object.keys(formData.pre_interview_answers).length > 0
           ? formData.pre_interview_answers
           : undefined
@@ -194,7 +195,7 @@ function JobApplicationPage() {
       window.scrollTo({ top: 0 });
     } catch (err) {
       console.error('Error submitting application:', err);
-      setError(err instanceof Error ? err.message : 'Erro ao enviar candidatura. Tente novamente.');
+      setError('Não foi possível enviar sua candidatura. Se você já se candidatou a esta vaga com este e-mail, confira sua caixa de entrada; senão, tente novamente em instantes.');
     } finally {
       setSubmitting(false);
     }

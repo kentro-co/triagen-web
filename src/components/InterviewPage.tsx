@@ -11,6 +11,37 @@ import StatusMessage from './ui/StatusMessage';
 import PageHeader from './ui/PageHeader';
 import { Input } from './ui/Field';
 import { startInterviewSession } from '../api/interview';
+import { ApiError } from '../api/client';
+
+/** The API's raw messages are English and technical; candidates see these. */
+function startErrorMessage(err: unknown): string {
+  if (err instanceof ApiError && /already completed/i.test(err.message)) {
+    return 'Esta entrevista já foi concluída. Obrigado pela participação!';
+  }
+  if (err instanceof ApiError && err.status < 500) {
+    return 'Código de entrevista inválido. Confira o código recebido por e-mail.';
+  }
+  return 'Não foi possível iniciar a entrevista agora. Verifique sua internet e tente novamente em instantes.';
+}
+
+/**
+ * Mobile browsers only play audio after a tap. Resuming a silent AudioContext
+ * inside the "start" tap unlocks playback for the interviewer's voice later;
+ * the room still shows a "tap to listen" button if this isn't enough.
+ */
+function unlockAudio() {
+  try {
+    const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new Ctx();
+    const source = ctx.createBufferSource();
+    source.buffer = ctx.createBuffer(1, 1, 22050);
+    source.connect(ctx.destination);
+    source.start(0);
+    ctx.resume().finally(() => setTimeout(() => ctx.close(), 1000));
+  } catch {
+    // Best effort only.
+  }
+}
 
 const TIPS = [
   'Escolha um ambiente silencioso e sem interrupções.',
@@ -29,9 +60,13 @@ function InterviewPage() {
   const [jwtToken, setJwtToken] = useState('');
   const { darkMode } = useDarkMode();
 
+  // A link from the e-mail goes through the mic/audio check first: starting the
+  // room without a tap leaves the interviewer silent on iOS, and the check
+  // asks for mic permission before the interview clock starts.
   useEffect(() => {
     if (urlToken) {
-      handleAuthentication(urlToken);
+      setToken(urlToken);
+      setIsPrechecking(true);
     }
   }, [urlToken]);
 
@@ -49,7 +84,7 @@ function InterviewPage() {
       setJwtToken(session.token);
       setIsAuthenticated(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao validar código');
+      setError(startErrorMessage(err));
     } finally {
       setIsLoading(false);
     }
@@ -63,7 +98,7 @@ function InterviewPage() {
   if (isPrechecking && !isAuthenticated && !isFinished) {
     return (
       <PreInterviewRoom
-        onConfirm={() => { setIsPrechecking(false); handleAuthentication(token); }}
+        onConfirm={() => { unlockAudio(); setIsPrechecking(false); handleAuthentication(token); }}
         onBack={() => setIsPrechecking(false)}
       />
     );
@@ -73,18 +108,20 @@ function InterviewPage() {
     return <InterviewFinishedPage />;
   }
 
-  // Finaliza a entrevista e notifica o backend (best-effort)
-  const handleInterviewFinished = async () => {
-    if (token) {
-      try {
-        const { finishInterviewSession } = await import('../api/interview');
-        await finishInterviewSession(token);
-      } catch {
-        // A finalização é best-effort; o backend também encerra por timeout
-      }
-    }
-    setIsFinished(true);
-  };
+  // Generating the interview plan can take a few seconds on the first start.
+  if (isLoading) {
+    return (
+      <div className={`min-h-[100dvh] flex flex-col items-center justify-center px-6 text-center font-sans ${darkMode ? 'bg-gray-900' : 'bg-triagen-neutral'}`}>
+        <div className={`w-12 h-12 rounded-full border-2 border-t-transparent animate-spin mb-4 ${darkMode ? 'border-gray-500' : 'border-triagen-primary'}`} />
+        <p className={`text-sm uppercase tracking-widest ${darkMode ? 'text-gray-400' : 'text-triagen-secondary'}`}>Preparando sua entrevista...</p>
+        <p className={`text-sm mt-2 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>Isso pode levar alguns segundos.</p>
+      </div>
+    );
+  }
+
+  // The worker saves the transcript when the session closes; the old
+  // /interview/analyze call here hit an endpoint that doesn't exist.
+  const handleInterviewFinished = () => setIsFinished(true);
 
   if (isAuthenticated) {
     return (

@@ -5,6 +5,7 @@ import Button from './ui/Button';
 import Card from './ui/Card';
 import StatusMessage from './ui/StatusMessage';
 import PageHeader from './ui/PageHeader';
+import { MIC_DENIED_MESSAGE } from '../utils/interviewMessages';
 
 type Step = 'mic' | 'audio';
 
@@ -21,6 +22,8 @@ function PreInterviewRoom({ onConfirm, onBack }: Readonly<PreInterviewRoomProps>
   const [micLevel, setMicLevel] = useState(0);
   const [micPermission, setMicPermission] = useState<boolean | null>(null);
   const [micPassed, setMicPassed] = useState(false);
+  // Some phones capture quietly; never leave the candidate stuck on this step.
+  const [allowSkip, setAllowSkip] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
   const micCtxRef = useRef<AudioContext | null>(null);
   const envelopeRef = useRef(0); // manual envelope follower (not state)
@@ -89,6 +92,11 @@ function PreInterviewRoom({ onConfirm, onBack }: Readonly<PreInterviewRoomProps>
       streamRef.current?.getTracks().forEach(t => t.stop());
       micCtxRef.current?.close();
     };
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setAllowSkip(true), 10_000);
+    return () => clearTimeout(t);
   }, []);
 
   // Clean up audio context on unmount
@@ -170,7 +178,7 @@ function PreInterviewRoom({ onConfirm, onBack }: Readonly<PreInterviewRoomProps>
                   <StatusMessage
                     type="error"
                     title="Acesso ao microfone negado"
-                    message="Permita o acesso ao microfone nas configurações do navegador e recarregue a página."
+                    message={MIC_DENIED_MESSAGE}
                     darkMode={darkMode}
                   />
                 ) : (
@@ -202,6 +210,15 @@ function PreInterviewRoom({ onConfirm, onBack }: Readonly<PreInterviewRoomProps>
                     Próximo
                   </Button>
                 </div>
+                {!micPassed && allowSkip && micPermission !== false && (
+                  <button
+                    type="button"
+                    onClick={() => setStep('audio')}
+                    className={`mt-4 w-full min-h-[44px] text-sm font-medium underline underline-offset-2 ${darkMode ? 'text-gray-400' : 'text-triagen-secondary'}`}
+                  >
+                    O sinal não aparece? Continuar mesmo assim
+                  </button>
+                )}
               </>
             )}
 
