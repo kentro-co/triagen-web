@@ -27,6 +27,7 @@ import Avatar from '../../ui/Avatar';
 import StatusMessage from '../../ui/StatusMessage';
 import { toast } from '../../ui/Toast';
 import { Candidate, JobWithStats } from '../../../types/company';
+import TestInterviewPanel from './TestInterviewPanel';
 
 interface JobWithCompany extends JobWithStats {
   company: {
@@ -265,6 +266,10 @@ function JobDetailsPage() {
         >
           {copied ? 'Link copiado!' : 'Copiar link de candidatura'}
         </Button>
+      </div>
+
+      <div className="mb-12 -mt-6 flex justify-end">
+        <TestInterviewPanel jobId={job.id} darkMode={darkMode} />
       </div>
 
       {/* Header */}
