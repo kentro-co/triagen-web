@@ -34,6 +34,9 @@ interface Job {
   };
 }
 
+const REPORT_POLL_INTERVAL_MS = 5_000;
+const REPORT_POLL_MAX_MS = 30 * 60_000;
+
 interface CandidateWithJob extends Candidate {
   job: Job;
   score?: number;
@@ -128,15 +131,29 @@ function CandidateProfilePage() {
   }, [candidateId, userId]);
 
   // The evaluation is part of the candidate's page, not a separate destination.
+  // Until it is final, keep checking: the analysis lands a minute or two after
+  // the interview ends, and the page should update on its own.
   useEffect(() => {
     if (!candidateId) return;
     let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const startedAt = Date.now();
 
-    getInterviewReport({ candidateId })
-      .then((data) => { if (!cancelled) setReport(data); })
-      .catch((err) => console.error('Error fetching interview report:', err));
+    const load = () => {
+      getInterviewReport({ candidateId })
+        .then((data) => {
+          if (cancelled) return;
+          setReport(data);
+          const final = data?.status === 'completed' || data?.status === 'failed';
+          if (!final && Date.now() - startedAt < REPORT_POLL_MAX_MS) {
+            timer = setTimeout(load, REPORT_POLL_INTERVAL_MS);
+          }
+        })
+        .catch((err) => console.error('Error fetching interview report:', err));
+    };
+    load();
 
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(timer); };
   }, [candidateId]);
 
   const toggleFavorite = async () => {
@@ -209,6 +226,11 @@ function CandidateProfilePage() {
     new Date(value).toLocaleDateString('pt-BR', { year: 'numeric', month: 'long', day: 'numeric' });
 
   const hasEvaluation = Boolean(report && (report.criteriaScores.length > 0 || report.summary));
+  const isAnalyzing = Boolean(report && !hasEvaluation && report.status !== 'failed');
+  const analysisFailed = report?.status === 'failed';
+  // The report can arrive after the page loaded (polling); prefer its values.
+  const score = candidate.score ?? (report?.status === 'completed' ? report.overallScore : undefined);
+  const status = report ? deriveCandidateStatus(report.status) : candidate.status;
   const recommendation = report ? parseRecommendation(report.summary).recommendation : null;
 
   // The application form stores the free-text resume summary in resume_url
@@ -248,8 +270,8 @@ function CandidateProfilePage() {
       <div className="grid grid-cols-1 md:grid-cols-12 gap-8 mb-12 items-end rise-in">
         <div className="md:col-span-8 flex flex-col gap-4">
           <div className="flex items-center gap-4">
-            <span className={`px-3 py-1 rounded-full text-[0.65rem] font-bold tracking-widest uppercase ${getStatusColor(candidate.status)}`}>
-              {getStatusShortText(candidate.status)}
+            <span className={`px-3 py-1 rounded-full text-[0.65rem] font-bold tracking-widest uppercase ${getStatusColor(status)}`}>
+              {getStatusShortText(status)}
             </span>
             <span className={`text-[0.65rem] uppercase tracking-widest font-semibold ${darkMode ? 'text-gray-400' : 'text-triagen-secondary'}`}>
               {candidate.job.title}
@@ -269,9 +291,9 @@ function CandidateProfilePage() {
             className={`flex items-center gap-5 w-full md:w-auto p-6 border rounded-lg ${recommendation ? `border-t-4 ${RECOMMENDATION_META[recommendation].accent(darkMode).wash}` : ''} ${darkMode ? 'border-gray-800 bg-gray-900/50' : 'border-triagen-border-light bg-white'}`}
             style={recommendation ? { borderTopColor: RECOMMENDATION_META[recommendation].accent(darkMode).borderTopColor } : undefined}
           >
-            {candidate.score !== undefined ? (
+            {score !== undefined ? (
               <>
-                <ScoreRing score={candidate.score} size="md" darkMode={darkMode} />
+                <ScoreRing score={score} size="md" darkMode={darkMode} />
                 <div className="flex flex-col">
                   <span className={`text-[0.65rem] tracking-widest uppercase font-semibold ${darkMode ? 'text-gray-500' : 'text-triagen-secondary'}`}>Compatibilidade</span>
                   <span className={`text-sm mt-0.5 ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}>com a vaga, de 0 a 100</span>
@@ -280,7 +302,7 @@ function CandidateProfilePage() {
             ) : (
               <div className="flex flex-col">
                 <span className={`text-[0.65rem] tracking-widest uppercase font-semibold ${darkMode ? 'text-gray-500' : 'text-triagen-secondary'}`}>Compatibilidade</span>
-                <span className={`text-sm mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>Aguardando entrevista</span>
+                <span className={`text-sm mt-0.5 ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>{isAnalyzing ? 'Analisando entrevista…' : 'Aguardando entrevista'}</span>
               </div>
             )}
           </div>
@@ -340,12 +362,18 @@ function CandidateProfilePage() {
 
           {!hasEvaluation && (
             <div className={`py-14 px-6 text-center border border-dashed rounded ${darkMode ? 'border-gray-800' : 'border-neutral-300'}`}>
+              {isAnalyzing && (
+                <div className={`w-8 h-8 mx-auto mb-4 rounded-full border-2 border-t-transparent animate-spin ${darkMode ? 'border-gray-500' : 'border-triagen-primary'}`} />
+              )}
               <p className={`font-heading text-xl mb-1 ${darkMode ? 'text-gray-200' : 'text-triagen-primary'}`}>
-                Avaliação ainda não disponível
+                {isAnalyzing ? 'Analisando a entrevista…' : analysisFailed ? 'Não foi possível gerar a avaliação' : 'Avaliação ainda não disponível'}
               </p>
               <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-triagen-secondary'}`}>
-                Assim que a entrevista for concluída, a análise por critério e as
-                evidências da conversa aparecem aqui.
+                {isAnalyzing
+                  ? 'A IA está avaliando a conversa critério por critério. Esta página atualiza sozinha em instantes.'
+                  : analysisFailed
+                    ? 'A análise desta entrevista falhou. A transcrição está salva e a análise pode ser refeita.'
+                    : 'Assim que a entrevista for concluída, a análise por critério e as evidências da conversa aparecem aqui.'}
               </p>
             </div>
           )}
